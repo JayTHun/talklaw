@@ -1,0 +1,15 @@
+[submodule "board"]
+	path = board
+	url = https://github.com/JayTHun/board.git
+[submodule "gateway"]
+	path = gateway
+	url = https://github.com/JayTHun/gateway.git
+[submodule "consult"]
+	path = consult
+	url = https://github.com/JayTHun/consult.git
+[submodule "schedule"]
+	path = schedule
+	url = https://github.com/JayTHun/schedule.git
+[submodule "payment"]
+	path = payment
+	url = https://github.com/JayTHun/payment.git
