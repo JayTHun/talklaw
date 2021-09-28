@@ -360,15 +360,15 @@ Consult, Payment, Schedule는 H2 Database, Board는 HSQL Database를 사용하�
 
 |서비스|DB|pom.xml|
 | :--: | :--: | :--: |
-|board| HSQL |![image](./images/tl_polyglot_h2.PNG)|
-|consult| H2 |![image](./images/tl_polyglot_hsql.PNG)|
-|schedule| H2 |![image](./images/tl_polyglot_hsql.PNG)|
-|payment| H2 |![image](./images/tl_polyglot_hsql.PNG)|
+|board| HSQL |![image](./images/tl_polyglot_hsql.PNG)|
+|consult| H2 |![image](./images/tl_polyglot_h2.PNG)|
+|schedule| H2 |![image](./images/tl_polyglot_h2.PNG)|
+|payment| H2 |![image](./images/tl_polyglot_h2.PNG)|
 
 
 ## SAGA / Correlation
 사용자에 의해 상담이 요청되고 결제가 완료되면, 상담인(변호사)에게 해당 내용이 전달된다. 하지만, 변호사일정관리 시스템에서 미리 정의한 '대면상담 가능지역'일 경우에만 해당 내용을 확인 및 수락할 수 있으며, 그 외의 경우에는 자동 거절, 결제 취소, 그리고 사용자에게도 상담이 거절되었음을 알리도록 구현하였다.
-(correlation key는 최초 상담요청시 발생하는 consultId)tl_saga_1.png
+(correlation key는 최초 상담요청시 발생하는 consultId)
 
 - 고객이 상담요청 및 결제 완료 후, Schedule(일정관리시스템)에 해당 내용 전달
 ![image](./images/tl_saga_1.png)
@@ -678,13 +678,13 @@ public class ConsultController {
 }
 ```
 
-- 결제서비스 Payment에서 문제가 발생 시, 아래와 같이 처리된다. 
-![img](images/tl_syncfallback_1.png)
+- 결제서비스 Payment에서 '결제 수단'을 이용해서 결제 진행 중, 결제 서비스 호출 시 가상의 장애 상황을 발생시켰으며, 처리는 아래와 같다. 
+![img](images/tl_syncfallback_2.png)
 
 ![img](images/tl_syncfallback_1.png)
      
    
-## 비동기식 호출 / 시간적 디커플링 / 장애격리 / 최종 (Eventual) 일관성
+## 비동기식 호출 / 시간적 디커플링 / 장애격리 / 최종 (Eventual) 일관성 테스트
 본 시스템에 적용되어 있는 주요 비동기 호출은 다음과 같다.
 ```
   • Call 결제시, Catcher에게 알려줌 (CallPayed --> receiveCall)
@@ -700,64 +700,131 @@ public class ConsultController {
 ```
 이를 위해 각각의 마이크로서비스에 이벤트를 수신 처리하는 PolicyHandler를 구현하였다.
 
-- Dashboard의 PolicyHandler 
+각 마이크로서비스 간의 이벤트 발생 시, 동기식이 아닌 비동기식 호출을 한다. 법률상담시스템에서는 사용자 결제 시, 결제 시스템간의 'Req/Res'를 제외하면, 나머지는 'Pub/Sub' 패턴의 비동기 식으로 구현되어 있다. 
+각 이벤트들은 Kafka로 이벤트를 송출하며, 수신한 데이터 처리는 PolicyHandler를 구현하여 처리한다.  
+
+ 
+ - Schedule 서비스에서 이벤트 발생 시 마다, 카프카로 도메인 이벤트를 송출한다.
 ```java
-   // 대시보드를 생성한다.
-    @StreamListener(KafkaProcessor.INPUT)
-    public void wheneverCallMade_inputRecord(@Payload CallMade callMade){
-        if(!callMade.validate()) return;
+    // 상담접수 (수락 or 불가)
+    @PostPersist
+    public void onPostPersist() {
+        System.out.println("###########################");
+        System.out.println(" Schedule onPostPersist")        
+        System.out.println("###########################");
 
-        String extraIdName = "";
-        Long   extraIdValue = null;
-        String description = " mobile=" + callMade.getMobile() +
-                            ", location=" + callMade.getLocation() +
-                            ", payType=" + callMade.getPayType() +
-                            ", payAmount=" + callMade.getPayAmount() ;
-        inputRecord(callMade, extraIdName, extraIdValue, description);
-    }
-    ...
+        if (this.getScheduleStatus() == ScheduleStatus.RECEIVED) {          
+            System.out.println("###########################");
+            System.out.println("접수되었습니다. (대면상담을 위한 이동이 가능한 지역)");
+            System.out.println("###########################");
+            
+            ScheduleReceived scheduleReceived = new ScheduleReceived();
+            BeanUtils.copyProperties(this, scheduleReceived);
+            scheduleReceived.publishAfterCommit();
+        } else if (this.getScheduleStatus() == ScheduleStatus.DENIED) {          
+            System.out.println("###########################");
+            System.out.println(" ### 대면 상담이 불가한 지역입니다. ###");          
+            System.out.println("###########################");
 
-    // 콜 접수 대시보드 생성
-    @StreamListener(KafkaProcessor.INPUT)
-    public void wheneverCallReceived_inputRecord(@Payload CallReceived callReceived){
-        if(!callReceived.validate()) return;
-
-        String extraIdName = "";
-        Long   extraIdValue = null;
-        String description = " mobile=" + callReceived.getMobile() +
-                ", location=" + callReceived.getLocation() + " : 콜 접수 대기중입니다. ";
-        inputRecord(callReceived, extraIdName, extraIdValue, description);
-    }
-
-    // 콜 거절 대시보드 생성
-    @StreamListener(KafkaProcessor.INPUT)
-    public void wheneverCatchDenied_inputRecord(@Payload CatchDenied catchDenied){
-        if(!catchDenied.validate()) return;
-
-        String extraIdName = "";
-        Long   extraIdValue = null;
-        String description = " mobile=" + catchDenied.getMobile() +
-                ", location=" + catchDenied.getLocation() + " : 서비스 불가 지역입니다."  ;
-        inputRecord(catchDenied, extraIdName, extraIdValue, description);
+            ScheduleDenied scheduleDenied = new ScheduleDenied();
+            BeanUtils.copyProperties(this, scheduleDenied);
+            scheduleDenied.publishAfterCommit();
+        }
     }
 
-    ...
+    // 상담을 수락 및 취소 시
+    @PostUpdate
+    public void onPostUpdate() {
+        System.out.println("###########################");
+        System.out.println("Schedule onPostUpdate");
+        System.out.println("###########################");
+
+        if (this.getScheduleStatus() == ScheduleStatus.SCHEDULING) {      
+            System.out.println("###########################");
+            System.out.println(" 변호사가 상담을 수락하였습니다.");      
+            System.out.println("###########################");
+
+            ScheduleAccepted scheduleAccepted = new ScheduleAccepted();
+            BeanUtils.copyProperties(this, scheduleAccepted);
+            scheduleAccepted.publishAfterCommit();
+
+        } else if (this.getScheduleStatus() == ScheduleStatus.DENIED) {      
+            System.out.println("###########################");
+            System.out.println("대면 상담이 불가한 지역입니다.");      
+            System.out.println("###########################");
+
+            ScheduleDenied scheduleDenied = new ScheduleDenied();
+            BeanUtils.copyProperties(this, scheduleDenied);
+            scheduleDenied.publishAfterCommit();
+
+        } else  if (this.getScheduleStatus() == ScheduleStatus.CANCELLED) {      
+            System.out.println("###########################");
+            System.out.println("상담이 취소되었습니다.");      
+            System.out.println("###########################");
+
+            ScheduleCancelled scheduleCancelled = new ScheduleCancelled();
+            BeanUtils.copyProperties(this, scheduleCancelled);
+            scheduleCancelled.publishAfterCommit();
+        }
+    }
+}
+
+```
+
+- board서비스는 PolicyHandler에서 Schedule에서 송출한 이벤트를 수신, 처리하도록 구현한다.
+```java
+    @StreamListener(KafkaProcessor.INPUT)
+    public void wheneverPaymentDisabled_inputRecord(@Payload PaymentDisabled paymentDisabled){
+        if(!paymentDisabled.validate()) return;
+        String extraIdName = "paymentId";
+        Long   extraIdValue = paymentDisabled.getPaymentId();
+        String description = "상담서비스 공급자에 의해 결제가 취소되었습니다." ;
+        inputRecord(paymentDisabled, extraIdName, extraIdValue, description);
+
+    }
+    
+    @StreamListener(KafkaProcessor.INPUT)
+    public void wheneverScheduleAccepted_inputRecord(@Payload ScheduleAccepted scheduleAccepted){
+        if(!scheduleAccepted.validate()) return;
+        String extraIdName = "scheduleId";
+        Long   extraIdValue = scheduleAccepted.getScheduleId();
+        String description = "lawerName=" + scheduleAccepted.getLawerName() + " : 변호사가 상담 요청을 수락하였습니다.";
+        inputRecord(scheduleAccepted, extraIdName, extraIdValue, description);
+
+    }
+
+    @StreamListener(KafkaProcessor.INPUT)
+    public void wheneverScheduleCancelled_inputRecord(@Payload ScheduleCancelled scheduleCancelled){
+        if(!scheduleCancelled.validate()) return;
+        String extraIdName = "scheduleId";
+        Long   extraIdValue = scheduleCancelled.getScheduleId();
+        String description = "접수된 상담요청이 사용자에 의해 취소되었습니다." ;
+        inputRecord(scheduleCancelled, extraIdName, extraIdValue, description);
+
+    }
 
  ```
- 
-위와 같은 비동기 방식으로 콜요청 및 결제시스템과 대리기사용 Catcher 시스템이 분리되어 있기 때문에 잠시 Catcher시스템에 장애가 있더라도 Catcher 시스템을 재기동한 후, 요청된 콜을 확인할 수 있다.
-1) catcher가 가동되지 않은 상태에서 콜 결제를 처리한다. 
-![](/images/cal262-catcher-killed.png)   
-_(catcher가 없어도 콜 요청 및 결제가 실행된다.)_
 
-1) catcher가 가동되면서 밀려있는 콜을 수신한다.
-![](/images/cal262-catcher-alive.png)   
-_(catcher 서비스가 수행된 후 대기중인 콜 요청을 수신한다.)_
-   
-   
-   
-   
-   
+1) schedule, board 서비스를 중단한다.  
+![img](images/tl_async_call_boardKill_1.png)
+
+
+2) consult, payment에서 상담요청, 결제를 처리한다. 
+![img](images/tl_async_call_boardKill_2.png)
+
+
+3) 중단했던 schedule, board를 재기동한다. 
+![img](images/tl_async_call_boardKill_3.png)
+
+
+4) schedule이 재기동 되면서, 대기중인 요청이력을 수신한다.
+![img](images/tl_async_call_boardKill_4.png)
+
+
+5) board가 재기동 되면서, 대기중인 요청이력, 결재이력을 수신한다.
+![img](images/tl_async_call_boardKill_5.png)
+
+
 
 # 배포 및 운영:
 
