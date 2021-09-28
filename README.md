@@ -349,9 +349,9 @@ public interface ScheduleRepository extends PagingAndSortingRepository<Schedule,
 
 ## CQRS 구현
 Board 서비스는 CQRS 패턴을 적용, 타 마이크로서비스의 데이터 원본에 접근없이 잦은 조회가 가능하게 구현하였다. 법률 상담 서비스 프로젝트의 View 역할은 myPage 서비스가 수행한다.
-![](/images/tl_cqrs_2.png)
+![](/images/tl_cqrs_2.PNG)
 
-![](/images/tl_cqrs_1.png)
+![](/images/tl_cqrs_1.PNG)
 
 
 ## 폴리글랏 퍼시스턴스
@@ -360,10 +360,10 @@ Consult, Payment, Schedule는 H2 Database, Board는 HSQL Database를 사용하�
 
 |서비스|DB|pom.xml|
 | :--: | :--: | :--: |
-|board| HSQL |![image](./images/tl_polyglot_h2.png)|
-|consult| H2 |![image](./images/tl_polyglot_hsql.png)|
-|schedule| H2 |![image](./images/tl_polyglot_hsql.png)|
-|payment| H2 |![image](./images/tl_polyglot_hsql.png)|
+|board| HSQL |![image](./images/tl_polyglot_h2.PNG)|
+|consult| H2 |![image](./images/tl_polyglot_hsql.PNG)|
+|schedule| H2 |![image](./images/tl_polyglot_hsql.PNG)|
+|payment| H2 |![image](./images/tl_polyglot_hsql.PNG)|
 
 
 ## Gateway 적용
