@@ -1,0 +1,33 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: vhost-ingress
+  namespace: talklawer
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+  - host: consult.talklawer.com
+    http:
+      paths:
+      - backend:
+          serviceName: talklawer
+          servicePort: 8080
+  - host: schedule.talklawer.com
+    http:
+      paths:
+      - backend:
+          serviceName: schedule
+          servicePort: 8080
+  - host: board.talklawer.com
+    http:
+      paths:
+      - backend:
+          serviceName: board
+          servicePort: 8080
+  - host: payment.talklawer.com
+    http:
+      paths:
+      - backend:
+          serviceName: payment
+          servicePort: 8080
