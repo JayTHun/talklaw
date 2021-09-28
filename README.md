@@ -1,11 +1,11 @@
 ![image](./images/lawtalk_CI.png)
 
 Repositories
-- <b>상담관리</b> - https://github.com/JayTHun/consult.git
-- <b>일정관리</b> - https://github.com/JayTHun/schedule.git
-- <b>마이페이지</b> - https://github.com/JayTHun/board.git
-- <b>게이트웨이</b> - https://github.com/JayTHun/gateway.git
-- <b>결제관리</b> - https://github.com/JayTHun/payment.git
+- <b>상담관리</b>    - https://github.com/JayTHun/consult.git
+- <b>일정관리</b>    - https://github.com/JayTHun/schedule.git
+- <b>마이페이지</b>  - https://github.com/JayTHun/board.git
+- <b>게이트웨이</b>  - https://github.com/JayTHun/gateway.git
+- <b>결제관리</b>    - https://github.com/JayTHun/payment.git
 # Consult-Lawer (법률 상담 서비스)
 
 # Table of contents
@@ -86,10 +86,6 @@ Repositories
 # 분석/설계:
 
 
-## 개요 및 구성 목표
-- 구성원 개인 역할 중심의 Horizontally-Aligned 조직에서 서비스 중심의 Vertically-Aligned 조직으로 전환되면서 각 서비스를 분리하여 Domain-driven한 마이크로서비스 아키텍쳐를 클라우드 네이티브하게 구현한다.
-
-
 ## AS-IS 조직 (Horizontally-Aligned)
 
 ![image](./images/tl_as-is.png)
@@ -101,7 +97,6 @@ Repositories
 
 ## 서비스 설계를 위한 Event Storming
 
-- 다음과 같은 순서로 최종 모델을 도출하였음.
 - **Event 도출 -> 부적격 Event 탈락 -> Actor/Commend 부착 -> Aggregate 묶기 -> Bounded Context 묶기 -> Policy 도출, 이동 -> Context Mapping -> 1차 모델 도출 -> 요구사항 검증 및 보완 -> 최종 모델**
 
 
@@ -115,28 +110,26 @@ Repositories
   
   과정 중 도출된 여러 이벤트 중 잘못되거나 프로젝트 범위에 맞지 않는 도메인 이벤트들을 걸러내는 작업을 수행함
 
-    - UI의 이벤트/업무적인 이벤트 아니기 때문에 제외함: 상담정보입력됨, 결제요청됨, 상담리스트확인됨, 상담요청수락알림수신됨, 결제거부됨
-    - 프로젝트 범위에 벗어난다고 판단하여 제외함: 상담수락취소됨
-   	- 1차 필터링 되었으나, 이후 비즈니스 Needs에 따라 추가 가능한 후보군으로 분류함: 요청콜 접수됨, 결제지불됨, 콜거부됨
-
+    - 상담정보(구분,유형,가격)입력됨, 상담료 결제요청됨, 상담료 결제거부됨, 상담리스트 확인됨, 상담수락 취소됨, 상담요청수락알림수신됨
 
 ### Actor, Command 부착하여 가독성개선
 ![image](./images/tl_actor_command.png)
 
 
+    - Event를 발생시키는 Command와 Command를 발생시키는주체, 담당자 또는 시스템을 식별함
+    - Actor : 고객(피상담임), 변호사(상담인), 결제시스템(표시하진않음)
+    - Command : 상담 요청/취소, 상담요청 수락/취소, 결제, 결제취소
+
+
 ### Aggregate으로 묶기
 ![image](./images/tl_aggregate.png)
 
-    - 대리요청, 결제, 요청수락 Aggregate을 생성하였고, 해당 Aggregate아 연결된 Commnad, event들에 의하여 트랜잭션이 유지되어야 하는 단위로 그룹핑함
+    - 연관있는 도메인 이벤트들을 Aggregate 로 묶었음 
+    - Aggregate : 상담요청, 요청수락, 결제    
 
 
 ### Bounded Context로 묶기
 ![image](./images/tl_bounded_context.png)
-
-    - 도메인 서열 분리 
-        - Core Domain: call(고객 App.), grab(대리기사 App.) - 없어서는 안될 핵심 서비스이며, 연견 Up-time SLA 수준을 99.999% 목표, 배포주기는 call 의 경우 1주일 1회 미만, grab 의 경우 1개월 1회 미만
-        - Supporting Domain: 고객센터, 기사관리센터 - 경쟁력을 내기위한 서비스이며, SLA 수준은 연간 60% 이상 uptime 목표, 배포주기는 각 팀의 자율이나 표준 스프린트 주기가 1주일 이므로 1주일 1회 이상을 기준으로 함.
-        - General Domain: 결제 - 결제서비스로 3rd Party 외부 서비스를 사용하는 것이 경쟁력이 높음
 
 
 ### Policy 부착
@@ -146,216 +139,266 @@ Repositories
 ### Policy의 이동 / Context Mapping / 1차 Model
 ![image](./images/policy_cm_1st.png)
 
-    - 컨텍스트 매핑하여 점선/실선으로 연결함.
-    - 한글에서 영어로 변경함. 
-    - 명사형/동사형 고려 이름 조정함 (grab --> Catcher), "Call" 과 같은 Reserved word 는 "Caller"로 변경함
-    - caller 와 catcher 에 각각 View Model 추가
+    - 컨텍스트 매핑, 서비스 특성을 고려하여 이름 변경 및 영문 전환
+    - 각 Actor가 확인하는 MyPage(view) 추가
 
 
-### 1차 Model에 대한 요구사항 검증 및 보완
+### 1차 Model에 대한 시나리오 체크
 
 ![image](./images/tl_check.png)
 
-   	[기능적 요구사항]
-    - 1) 고객이 APP에서 대리기사를 요청한다. (√)
-   	- 2) 고객이 안내된 요금을 APP을 통해 미리 결제한다. (???) --> 콜요청과 결제요청 이벤트 분리에 대한 Need
-  	- 3) 결제가 완료 되면 콜 요청 내역이 대리기사에게 전달된다. (√)
-  	- 4) 대리기사에게 콜 정보가 도착하면 해당 콜을 수락한다. (√)  
-  	- 6) 요청이 수락되면 승객은 APP에서 진행상태를 조회할 수 있다. (???)	
-  	- 7) 고객이 중간에 요청을 취소할 수 있다. (√)
-   	- 8) 요청이 취소되면 결제가 취소된다. (√)
-  	- 9) 고객은 요청한 콜에 대한 모든 진행내역을 myPage를 통해 조회가능하다. (???)
+####  기능적 요구사항 Coverage Check
+  1) 사용자(고객, 피상담원)는 APP(or 웹페이지)에서 상담을 요청한다.
+  2) <u>*사용자는 선택한 상담유형에 따라 안내된 수수료(상담료)를 미리 결제한다.*</u>
+  3) 결제가 완료되면, 상담 요청이 상담원(변호사)에게 전달된다.
+  4) 상담원은 상담 요청 정보가 도착하면, 상담을 수락한다.
+  5) <u>*상담 요청이 수락되면 사용자는 APP(or 웹페이지)에서 진행상태를 조회할 수 있다.*</u> 
+  6) 사용자의 변심으로 상담 요청을 취소할 수 있다.
+  7) 상담 요청이 취소되면 결제는 취소된다.
+  8) <u>*사용자는 요청한 상담 건에 대한 진행 내역을 myPage를 통해서 조회 가능하다.*</u>
 
-    [비기능적 요구사항]
-  	- A) 대리기사 관리 시스템에 장애가 발생하더라도 콜 요청은 상시 받을 수 있어야 한다. (√)  
-  	- B) 콜 결제 시스템에 과부하 발생 시 요청을 잠시 보류하고, 잠시 후에 다시 하도록 유도한다. (√)  
+####  비기능적 요구사항 Coverage Check
+  A) 장애와 무관하게 상담 요청은 24시간 가능해야 한다.
+  B) 결제 시스템에 과부하 발생 시, 잠시 후에 다시 하도록 유도한다.  
 
 ### 최종 Model
 
 ![img](./images/tl_final_step1.png)
 
-    - 모델 검증 및 보완과정을 거쳐, 콜요청 후 지불이 완료되어야만 요청이 전달될 수 있도록 하기위해 별도의 "CallPayed" 이벤트 추가하여 모델 수정
-    - cancelCall은 call을 삭제하기 때문에 payCancelled 이벤트를 굳이 받을 필요가 없음
-    - View Model을 CQRS 패턴을 적용하여 독립적인 마이크로 서비스로 추출
-    - callID를 Key로 모든 히스토리 조회되도록 수정함
-
-
-
-
+   
 ### 최종 Model (기능 추가)
 ![img](/images/tl_final_step2.png)
 
-    - 서비스 불능 지역일 경우 콜요청이 Deny되는 프로세스에 대해 SAGA 패턴 적용
-    - catcher 서비스에서는 "receiveCall" 폴리시 및 기준정보에 따라, 수신된 콜에 대해 "CallReceived" 와 "CatchDenied" 2개의 이벤트가 추가 발생되도록 모델을 수정함.
-    - catcher 서비스에서 Deny된 결과가 caller에서도 수신될 수 있게, caller 서비스에 "denyCall" 폴리시와 "CallDenied" 이벤트를 추가하여 수정함. 
-
-  
+    - 이벤트 분리 (ConsultMade->ConsultMade, ConsultPayed) 및 이벤트 추가(ScheduleReceived)
+    - 법률상담시스템에서 미리 정한 상담가능지역 외에는 상담이 자동거절 및 결제취소되도록 하는 시나리오('6-1') 추가, 관련 폴리시(denyConsult)와 이벤트 추가(consultDenied, scheduleDenied)
+      
 ## 헥사고날 아키텍처 다이어그램 도출
 
 ![img](./images/tl_hexagonal.png)
 
     - Chris Richardson, MSA Patterns 참고하여 Inbound adaptor와 Outbound adaptor를 구분함
     - 호출관계에서 PubSub 과 Req/Resp 를 구분함
-    - 서브 도메인과 바운디드 컨텍스트의 분리:  각 팀의 KPI 별로 아래와 같이 관심 구현 스토리를 나눠가짐
-
    
    
 # 구현:
 
-분석/설계 단계에서 도출된 헥사고날 아키텍처에 따라, 각 BC별로 대변되는 마이크로 서비스들을 **Spring Boot**로 구현하였다.
-구현한 각 서비스 로컬에서 실행하는 방법은 아래와 같다 (각자의 포트넘버는 위에서부터 8080 ~ 8084 이다)
+분석/설계 단계에서 도출된 헥사고날 아키텍처에 따라, 각 마이크로서비스를 **Spring Boot**로 구현하였으며, 구현한 각 서비스 로컬에서 실행하는 방법은 아래와 같다 (각자의 포트넘버는 8080 ~ 8084 이다)
 
 ```
 cd gateway
 mvn spring-boot:run
 
-cd caller
+cd consult
 mvn spring-boot:run  
 
 cd payment
 mvn spring-boot:run 
 
-cd catcher
+cd schedule
 mvn spring-boot:run
 
-cd dashboard
+cd board
 mvn spring-boot:run  
 ```
    
    
 ## DDD(Domain-Driven-Design) 의 적용
-이벤트 스토밍의 결과로 도출된 Aggregate 단위로 Entity를 정의하였으며, 각 Domain 별 Entity는 다음과 같다. 
-    - **caller(콜요청) / Payment(결제) / catcher(콜수락) / dashboard(고객/기사 페이지)**
+이벤트 스토밍(msaez.io)을 통해 구현한 Aggregate 단위로 Entity 를 정의, 선언 후 구현을 진행하였다. Entity Pattern 과 Repository Pattern을 적용하고, 데이터 접근 어댑터를 자동 생성하기 위하여 하기 위해 Spring Data REST 의 RestRepository 를 적용하였다.
 
-각 Entity별 Repository에는 RepositoryRestResource Pattern 등을 적용하고, Getter/Setter 구현을 자동화하하기 위해 lombok을 사용하였다.
-- Caller 서비스의 Caller.java
+- Schedule 서비스의 Schedule.java
 ```java
+
+package talklawer.domain;
+
+import talklawer.event.ScheduleAccepted;
+import talklawer.event.ScheduleReceived;
+import talklawer.event.ScheduleCancelled;
+import talklawer.event.ScheduleDenied;
+import org.springframework.beans.BeanUtils;
+import javax.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
 
 @Entity
 @Getter @Setter
-public class Caller {
+public class Schedule {
     @Id
-    @GeneratedValue(strategy= GenerationType.AUTO)
-    private Long callId;
+    @GeneratedValue(strategy= GenerationType.IDENTITY)
+    private Long scheduleId;
+    private String lawerName;
+    private ScheduleStatus scheduleStatus;
+    private Long consultId;      //consultee information
+    private String mobile;       //consultee information
+    private String location;     //consultee information
+    private Integer payAmount;   //consultee information
 
-    private String mobile;
-    private String location;
-
-    private PayType payType;
-    private Integer payAmount;
-
-    private CallerStatus status;
-    private Long paymentId;
-
-    // call 요청시 먼저 Payment 정보가 있어야 한다.
-    @PrePersist
-    public void onPrePersist() {
-        System.out.println(" ### Caller.onPrePersist ###");
-
-        if (this.payType == null ||
-            this.payAmount == null ) {
-           throw new InvalidParameterException("### FAILURE occurred in Caller saving : payType or payAmount is null. ###");
-        }
-        this.setStatus(CallerStatus.CREATED);
-    }
-
-    // call이 요청되면 CallMade 이벤트를 발생시킨다.
+    // 상담접수 (수락 or 불가)
     @PostPersist
     public void onPostPersist() {
+        System.out.println("###########################");
+        System.out.println(" Schedule onPostPersist")        
+        System.out.println("###########################");
 
-        System.out.println(" ### Caller.onPostPersist ###");
+        if (this.getScheduleStatus() == ScheduleStatus.RECEIVED) {          
+            System.out.println("###########################");
+            System.out.println("접수되었습니다. (대면상담을 위한 이동이 가능한 지역)");
+            System.out.println("###########################");
+            
+            ScheduleReceived scheduleReceived = new ScheduleReceived();
+            BeanUtils.copyProperties(this, scheduleReceived);
+            scheduleReceived.publishAfterCommit();
+        } else if (this.getScheduleStatus() == ScheduleStatus.DENIED) {          
+            System.out.println("###########################");
+            System.out.println(" ### 대면 상담이 불가한 지역입니다. ###");          
+            System.out.println("###########################");
 
-        CallMade callMade = new CallMade();
-        BeanUtils.copyProperties(this, callMade);
-        callMade.publishAfterCommit();
-
-        System.out.println(" ### CallMade Event Created ###");
+            ScheduleDenied scheduleDenied = new ScheduleDenied();
+            BeanUtils.copyProperties(this, scheduleDenied);
+            scheduleDenied.publishAfterCommit();
+        }
     }
 
-    // call이 삭제되면서 CallCancelled 이벤트를 발생시킨다.
-    @PostRemove
-    public void onPostRemove() {
-        System.out.println(" ### Caller.onPostRemove ###");
+    // 상담을 수락 및 취소 시
+    @PostUpdate
+    public void onPostUpdate() {
+        System.out.println("###########################");
+        System.out.println("Schedule onPostUpdate");
+        System.out.println("###########################");
 
-        CallCancelled callCancelled = new CallCancelled();
-        BeanUtils.copyProperties(this, callCancelled);
-        callCancelled.publishAfterCommit();
+        if (this.getScheduleStatus() == ScheduleStatus.SCHEDULING) {      
+            System.out.println("###########################");
+            System.out.println(" 변호사가 상담을 수락하였습니다.");      
+            System.out.println("###########################");
 
-        System.out.println(" ### CallCancelled Event Created ###");
+            ScheduleAccepted scheduleAccepted = new ScheduleAccepted();
+            BeanUtils.copyProperties(this, scheduleAccepted);
+            scheduleAccepted.publishAfterCommit();
+
+        } else if (this.getScheduleStatus() == ScheduleStatus.DENIED) {      
+            System.out.println("###########################");
+            System.out.println("대면 상담이 불가한 지역입니다.");      
+            System.out.println("###########################");
+
+            ScheduleDenied scheduleDenied = new ScheduleDenied();
+            BeanUtils.copyProperties(this, scheduleDenied);
+            scheduleDenied.publishAfterCommit();
+
+        } else  if (this.getScheduleStatus() == ScheduleStatus.CANCELLED) {      
+            System.out.println("###########################");
+            System.out.println("상담이 취소되었습니다.");      
+            System.out.println("###########################");
+
+            ScheduleCancelled scheduleCancelled = new ScheduleCancelled();
+            BeanUtils.copyProperties(this, scheduleCancelled);
+            scheduleCancelled.publishAfterCommit();
+        }
     }
 }
+
 ```
 
-**Entity Pattern** 과 **Repository Pattern** 을 적용하여 JPA 를 통하여 다양한 데이터소스 유형 (RDB or NoSQL) 에 대한 별도의 처리가 없도록
-데이터 접근 어댑터를 자동 생성하기 위하여 **Spring Data REST** 의 RestRepository 를 적용하였다.
-- Caller 서비스의 CallerRepository.java
+- Schedule 서비스의 ScheduleRepository.java
 ```java
-@RepositoryRestResource(collectionResourceRel="calls", path="calls")
-public interface CallerRepository extends PagingAndSortingRepository<Caller, Long> {
 
+package talklawer.domain;
+
+import org.springframework.data.repository.PagingAndSortingRepository;
+import org.springframework.data.rest.core.annotation.RepositoryRestResource;
+
+import java.util.Optional;
+
+@RepositoryRestResource(collectionResourceRel="schedule", path="schedule")
+public interface ScheduleRepository extends PagingAndSortingRepository<Schedule, Long> {
+
+    public Optional<Schedule> findByConsultId(Long consultId);
 }
+
 ```
    
 다음은 REST API를 호출하여 정상적으로 동작되는지 확인한 결과이다.
-- Caller 서비스에서 콜 요청    
-![image](./images/cal262-restapi.png)
+- Consult에서 고객이 법률 상담 요청    
+![image](./images/flowCheck1_consultMade.png)
 
-- Caller 서비스에서 콜 결제 요청   
-![](/images/cal262-call-pay.png)
+- Consult에서 고객이 상담료 결제   
+![](/images/flowCheck2_consultPayed.png)
 
 
-- Payment 서비스에서 "결제상태" 확인   
-![](/images/cal262-payment-check.png)
+- Schedule에서 상담원이 일정 수락   
+![](/images/flowCheck4_scheduleAccepted.png)
 
-- Cathcer 서비스에서 콜 접수 처리   
-![](/images/cal262-catchCall.png)
 
-- 콜 요청 취소   
-![image](./images/cal262-restapi2.png)
+- 상담 일정 확인  
+![](/images/flowCheck5_checkSchedule.png)
 
-- kafka 이벤트 모니터링   
-![](/images/cal262-kafka.png)
-   
-      
+
+- 사용자의 변심으로 인한 상담 취소  
+![image](./images/flowCheck6_consultCancelled.png)
+
+
+- 상담 취소에 따른, 결제 취소  
+![image](./images/flowCheck7_checkPayment.png)
+
+
+- 상담 취소에 따른, 변호사 일정 취소  
+![image](./images/flowCheck8_checkSchedule.png)
+
+
+- 마이페이지 이력조회
+![image](./images/flowCheck9_checkBoard.png)
+
+
+## CQRS 구현
+Board 서비스는 CQRS 패턴을 적용, 타 마이크로서비스의 데이터 원본에 접근없이 잦은 조회가 가능하게 구현하였다. 법률 상담 서비스 프로젝트의 View 역할은 myPage 서비스가 수행한다.
+![](/images/tl_cqrs_2.png)
+
+![](/images/tl_cqrs_1.png)
+
+
 ## 폴리글랏 퍼시스턴스
 
-dashboard 서비스의 경우, H2DB를 사용한 다른 서비스들과 구별하기 위하여, hsqldb를 사용하였다.  
-이를 위해 dashboard의 pom.xml에 dependency를 h2database에서 hsqldb로 변경 적용하였다.
-이를 통해 MSA간 서로 다른 종류의 DB간에도 문제 없이 동작하여 다형성을 만족하는지 확인하였다. 
+Consult, Payment, Schedule는 H2 Database, Board는 HSQL Database를 사용하였으며, 이를 통하여 MSA간 서로 다른 종류의 DB간에도 문제 없이 동작하여 다형성을 만족하는지 확인하였다.
 
 |서비스|DB|pom.xml|
 | :--: | :--: | :--: |
-|caller, payment, catcher| H2 |![image](./images/h2db.png)|
-|dashboard| hsql |![image](./images/hsql.png)|
+|board| HSQL |![image](./images/tl_polyglot_h2.png)|
+|consult| H2 |![image](./images/tl_polyglot_hsql.png)|
+|schedule| H2 |![image](./images/tl_polyglot_hsql.png)|
+|payment| H2 |![image](./images/tl_polyglot_hsql.png)|
 
 
 ## Gateway 적용
 
-gateway > application.yml 설정
+gateway를 이용하여, 서비스 진입점을 단일화할 수 있다.
 
+application.yaml 설정
 ```yaml
 
+server:
+  port: 8080
+
+---
+
 spring:
-  profiles: docker
+  profiles: default
   cloud:
     gateway:
       routes:
-        - id: caller
-          uri: http://caller:8081
+        - id: consult
+          uri: http://localhost:8081
           predicates:
-            - Path=/calls/**
+            - Path=/consult/**
         - id: payment
-          uri: http://payment:8082
+          uri: http://localhost:8082
           predicates:
-            - Path=/payments/**
-        - id: catcher
-          uri: http://catcher:8083
+            - Path=/payment/**
+        - id: schedule
+          uri: http://localhost:8083
           predicates:
-            - Path=/catches/**
-        - id: dashboard
-          uri: http://dashboard:8084
+            - Path=/schedule/**
+        - id: board
+          uri: http://localhost:8084
           predicates:
-            - Path= /dashboards/**
+            - Path=/board/**
       globalcors:
         corsConfigurations:
           '[/**]':
@@ -367,24 +410,58 @@ spring:
               - "*"
             allowCredentials: true
 
+---
+
+spring:
+  profiles: docker
+  cloud:
+    gateway:
+      routes:
+        - id: consult
+          uri: http://consult:8080
+          predicates:
+            - Path=/consult/**
+        - id: payment
+          uri: http://payment:8080
+          predicates:
+            - Path=/payment/**
+        - id: schedule
+          uri: http://schedule:8080
+          predicates:
+            - Path=/schedule/**
+        - id: board
+          uri: http://board:8080
+          predicates:
+            - Path= /board/**
+      globalcors:
+        corsConfigurations:
+          '[/**]':
+            allowedOrigins:
+              - "*"
+            allowedMethods:
+              - "*"
+            allowedHeaders:
+              - "*"
+            allowCredentials: true 
+
 server:
   port: 8080
 ```
 
-## gateway 테스트
+## gateway 적용
 
 gateway와 ingress를 통한 서버스 인바운드 연결 지원을 테스트 한다.
 
 1. Gateway
-- gateway의 External-IP를 확인 하여 로컬의 Host 파일에 적용
-![gateway00](https://user-images.githubusercontent.com/45417337/133038179-51e80e41-60c4-4de3-959e-74d645c35f8c.PNG)
-![gateway01](https://user-images.githubusercontent.com/45417337/133038251-0112d59f-ea38-49df-9e99-ca4b57eb222a.PNG)
+- 로컬의 Hosts 파일에 각 서비스들을 external-IP를 이용하여 등록
+![image](./images/tl_gateway_test3.png)
+![image](./images/tl_gateway_test4.png)
+![image](./images/tl_gateway_test5.png)
 
-- gateway의 External-IP를 통해  Call 생성
-![gateway1](https://user-images.githubusercontent.com/45417337/133038354-552bc0dd-0bdb-41b5-ac1b-0fa20fbc97ab.PNG)
 
-- gateway의 URI를 통해  Call 확인
-![gateway3](https://user-images.githubusercontent.com/45417337/133041698-a5d8c11d-7967-426e-be39-fe554430c405.PNG)
+- 상담요청 및 확인이 정상적으로 수행되는지 확인
+![image](./images/tl_gateway_test6.png)
+![image](./images/tl_gateway_test7.png)
 
 
 ## 동기식 호출과 Fallback 처리
@@ -666,10 +743,7 @@ _(catcher 서비스가 수행된 후 대기중인 콜 요청을 수신한다.)_
 아래는 SAGA 패턴이 적용되어 정상적으로 요청되었던 콜이 Catcher에 의해 처리되는 동안 발생되는 이벤트를 보여준다.   
 ![](/images/cal262-SAGA-event.png)   
    
-## CQRS 구현
-복잡한 비즈니스 로직과 트랜잭션 처리를 해야 하는 Caller,Payment,Catcher 서비스와 다르게 단순 조회만을 위주로 하는 Dashboard 서비스는 CQRS 패턴을 적용하여 단순 조회만을 처리한다.   
-![](/images/cal262-CQRS-ex1.png)
-![](/images/cal262-CQRS-ex2.png)
+
    
    
    
