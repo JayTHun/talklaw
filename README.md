@@ -20,11 +20,11 @@ Repositories
     - 헥사고날 아키텍처 다이어그램 도출
   - [구현방안 및 검증](#구현)
     - [DDD 의 적용](#ddddomain-driven-design-의-적용)
-    - [폴리글랏 퍼시스턴스](#폴리글랏-퍼시스턴스)
+    - [CQRS 구현](#cqrs-구현)
+    - [Polyglot Persistence](#Polyglot-Persistence)
+    - [SAGA / Correlation](#saga--correlation)
     - [동기식 호출 과 Fallback 처리](#동기식-호출과-fallback-처리)
     - [비동기식 호출 / 시간적 디커플링 / 장애격리 / 최종(Eventual) 일관성](#비동기식-호출--시간적-디커플링--장애격리--최종-eventual-일관성)
-    - [SAGA / Correlation](#saga--correlation)
-    - [CQRS 구현](#cqrs-구현)
   - [베포 및 운영](#배포-및-운영)
     - [CI/CD 설정](#cicd-설정)
     - [동기식 호출 / 서킷 브레이킹 / 장애격리](#동기식-호출--서킷-브레이킹--장애격리)
@@ -354,7 +354,7 @@ Board 서비스는 CQRS 패턴을 적용, 타 마이크로서비스의 데이터
 ![](/images/tl_cqrs_1.PNG)
 
 
-## 폴리글랏 퍼시스턴스
+## Polyglot Persistence
 
 Consult, Payment, Schedule는 H2 Database, Board는 HSQL Database를 사용하였으며, 이를 통하여 MSA간 서로 다른 종류의 DB간에도 문제 없이 동작하여 다형성을 만족하는지 확인하였다.
 
@@ -365,6 +365,63 @@ Consult, Payment, Schedule는 H2 Database, Board는 HSQL Database를 사용하�
 |schedule| H2 |![image](./images/tl_polyglot_hsql.PNG)|
 |payment| H2 |![image](./images/tl_polyglot_hsql.PNG)|
 
+
+## SAGA / Correlation
+사용자에 의해 상담이 요청되고 결제가 완료되면, 상담인(변호사)에게 해당 내용이 전달된다. 하지만, 변호사일정관리 시스템에서 미리 정의한 '대면상담 가능지역'일 경우에만 해당 내용을 확인 및 수락할 수 있으며, 그 외의 경우에는 자동 거절, 결제 취소, 그리고 사용자에게도 상담이 거절되었음을 알리도록 구현하였다.
+(correlation key는 최초 상담요청시 발생하는 consultId)tl_saga_1.png
+
+- 고객이 상담요청 및 결제 완료 후, Schedule(일정관리시스템)에 해당 내용 전달
+![image](./images/tl_saga_1.png)
+
+
+- 해당 시스템에서 가능지역 확인 후, 상담건에 대해서 거절
+![image](./images/tl_saga_2.png)
+
+
+- 결제 시스템에서 결제내역 취소
+![image](./images/tl_saga_3.png)
+
+
+- 고객의 상담요청건에 대해서도 거절처리
+![image](./images/tl_saga_4.png)
+
+
+상담요청 시, 발생한 consultId를 correlation 키로 사용
+```java
+package talklawer;
+
+import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cloud.stream.annotation.StreamListener;
+import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.stereotype.Service;
+
+import talklawer.config.kafka.KafkaProcessor;
+import talklawer.domain.ScheduleStatus;
+import talklawer.domain.Schedule;
+import talklawer.domain.ScheduleRepository;
+import talklawer.event.ConsultCancelled;
+import talklawer.event.ConsultPayed;
+
+@Service
+public class PolicyHandler{
+    @Autowired
+    ScheduleRepository scheduleRepository;
+
+    // Consult에서 정상 결제된 상담건에 대해서 receive 처리한다(consultPayed --pubsub-- schedule을 생성).
+    @StreamListener(KafkaProcessor.INPUT)
+    public void wheneverConsultPayed_receiveSchedule(@Payload ConsultPayed consultPayed){
+
+        if(!consultPayed.validate()) return;
+        System.out.println("\n\n##### listener receiveSchedule of Lawer : " + consultPayed.toJson() + "\n\n");
+
+        Optional<Schedule> optionalSchedule = scheduleRepository.findByConsultId(consultPayed.getConsultId());
+```
+   
+board 서비스에서 최초 상담요청부터 요청건에 대한 거절까지, SAGA 패턴이 적용되는 전체 현황을 확인할 수 있다. 
+![image](./images/tl_saga_5.png)
+   
 
 ## Gateway 적용
 
@@ -465,108 +522,166 @@ gateway와 ingress를 통한 서버스 인바운드 연결 지원을 테스트 �
 
 
 ## 동기식 호출과 Fallback 처리
-고객은 대리기사 호출을 위해 자신의 연락처,위치,지불방식 등을 입력한 후에 최종적으로 결제를 완료해야 한다.
-결제가 완료되지 않으면 대리기사 호출을 할 수 없도록 FeginClient를 이용한 동기 호출 방식을 적용하였다. 
+고객이 최초 상담 요청 시, 결제를 수행해야만 변호사가 상담요청을 받을 수 있도록 하였으며, 이를 구현하기 위하여 호출 프로토콜은 Rest Repository에 의해 노출되어있는 REST 서비스를 FeignClient 를 이용하여 동기호출하도록 하였다.
 
-- Caller 서비스 내의 external.PaymentService 
+- Consult 서비스 내의 external.PaymentService 
 ```java
+package talklawer.external;
+
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.*;
+import talklawer.util.PaymentResult;
+import java.util.HashMap;
+
 @FeignClient(name="payment", url="${api.url.payment}", fallback = PaymentServiceFallback.class)
 public interface PaymentService {
-    @RequestMapping(method= RequestMethod.GET, path="/payments/approve")
+    @RequestMapping(method= RequestMethod.POST, path="/payment/approve")
     public PaymentResult approve(@RequestBody HashMap<String, String> map);
 }
 ```
-- external.PaymentServiceFallback
+
 ```java
+package talklawer.external;
+
+import org.springframework.stereotype.Component;
+import org.springframework.web.bind.annotation.RequestBody;
+import talklawer.util.PaymentResult;
+import java.util.HashMap;
+
 @Component
 public class PaymentServiceFallback implements PaymentService {
     @Override
     public PaymentResult approve(@RequestBody HashMap<String, String> map) {
-        // 에러코드(-2)와 메시지를 리턴한다.
-        PaymentResult pr = new PaymentResult();
-        pr.setResultCode(-2L);
-        pr.setResultMessage("### Circuit Breaker has been opened. Fallback returned instead ###");
-
+        PaymentResult paymentResult = new PaymentResult();
+        paymentResult.setResultCode(-2L);
         return pr;
     }
 }
 ``` 
    
 
-- 실제 Payment 마이크로서비스에 구현되어 있는 REST API
+- Payment 서비스에 구현되어 있는 REST API()
 ```java
-    @RequestMapping(value = "/payments/approve",
-            method = RequestMethod.GET,
+package talklawer.controller;
+
+import talklawer.domain.PayType;
+import talklawer.domain.Payment;
+import talklawer.domain.PaymentRepository;
+import talklawer.util.PaymentResult;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import java.security.InvalidParameterException;
+import java.util.HashMap;
+import java.util.Optional;
+
+@RestController
+public class PaymentController {
+    @Autowired
+    PaymentRepository paymentRepository;
+
+    @RequestMapping(value = "/payment/approve",
+            method = RequestMethod.POST,
             produces = "application/json;charset=UTF-8")
     public PaymentResult approve(@RequestBody HashMap<String, String> map) {
-    
-        PaymentResult pr = new PaymentResult();
+
+        PaymentResult paymentResult = new PaymentResult();
         try {
-            String callId    = this.getParam(map, "callId", true);
+            String consultId = this.getParam(map, "consultId", true);
             String payType   = this.getParam(map, "payType", true);
             String payAmount = this.getParam(map, "payAmount", false);
-            String mobile    = this.getParam(map, "mobile", true);
-    
-            // approve 내에서 금액이 5000원 미만이면 에러가 발생
+            String mobile    = this.getParam(map, "mobile", true);          
+
             Payment payment = Payment.approve(
-                PayType.valueOf(payType),
-                Integer.valueOf(payAmount),
-                Long.valueOf(callId)
-                );
+                    PayType.valueOf(payType),
+                    Integer.valueOf(payAmount),
+                    Long.valueOf(consultId)
+            );
             paymentRepository.save(payment);
-    
-            pr.setResultCode(1L);
-            pr.setResultMessage(String.valueOf(payment.getPaymentId()));
+
+            paymentResult.setResultCode(1L);
+            paymentResult.setResultMessage(String.valueOf(payment.getPaymentId()));
             return pr;
-    
+
         } catch (Exception e) {
-            pr.setResultCode(-1L);  // 에러코드 및 메시지 리턴
-            pr.setResultMessage(e.getMessage());
+            System.out.println("<<<<< Sorry. Cannot make payment entity >>>>> ");
+            System.out.println(e.getMessage());
+
+            paymentResult.setResultCode(-1L);
+            paymentResult.setResultMessage(e.getMessage());
             return pr;
+        }
     }
 ```
    
 
-- Caller 서비스에서 PaymentService를 동기 방식으로 호출
+- Consult 서비스에서 PaymentService를 동기 방식으로 호출
 ```java
-    @PostMapping("/calls/payCall/{callId}")
-    public void payCall(@PathVariable Long callId) throws Exception {
-        Optional<Caller> caller = callerRepository.findById(callId);
-        ...
+package talklawer.controller;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+import talklawer.ConsultApplication;
+import talklawer.domain.Consult;
+import talklawer.domain.ConsultRepository;
+import talklawer.domain.ConsultStatus;
+import talklawer.exception.PaymentException;
+import talklawer.util.PaymentResult;
+import java.security.InvalidParameterException;
+import java.util.HashMap;
+import java.util.Optional;
+
+@RestController
+public class ConsultController {
+
+    @Autowired
+    ConsultRepository consultRepository;
+
+    @RequestMapping(value = "/consult/payConsult/{consultId}",
+            method = RequestMethod.GET,
+            produces = "application/json;charset=UTF-8")
+    public void payConsult(@PathVariable Long consultId) throws Exception {
+
+        Optional<Consult> consult = consultRepository.findById(consultId);
+
+        if (!consult.isPresent()) {
+            throw new InvalidParameterException("<<< 상담요청건을 찾을 수 없습니다 >>>");
+        }
+        Consult theConsult = consult.get();
+
+        if (theConsult.getStatus() == ConsultStatus.APPROVED) {
+            throw new RuntimeException("<<< 해당 상담건은 이미 결제된 상태입니다. >>>");
+        }
+
         HashMap<String, String > map = new HashMap<String, String>();
-        map.put("callId",    String.valueOf(theCaller.getCallId()));
-        map.put("mobile",    theCaller.getMobile());
-        map.put("payType",   String.valueOf(theCaller.getPayType()));
-        map.put("payAmount", String.valueOf(theCaller.getPayAmount()));
+        map.put("consultId",    String.valueOf(theConsult.getConsultId()));
+        map.put("mobile",    theConsult.getMobile());
+        map.put("payType",   String.valueOf(theConsult.getPayType()));
+        map.put("payAmount", String.valueOf(theConsult.getPayAmount()));
 
         // PaymentService에게 승인을 요청한다.
-        // PaymentService 호출에 실패할 경우 -2를 리턴받고,
-        // PaymetService 자체에서 오류가 날 경우 -1을 리턴한다.
-        PaymentResult pr = CallerApplication.applicationContext.getBean(
-                            nicecall.external.PaymentService.class)
-        .approve(map);
+        PaymentResult paymentResulr = ConsultApplication.applicationContext.getBean(talklawer.external.PaymentService.class)
+                .approve(map);
 
-        System.out.println("### PaymentService.process() returns : " + pr);
-
-        // Payment 호출에 실패하거나 응답이 지연된 경우
-        if (pr.getResultCode().equals(-2L)) {
+        // Payment에 실패한 경우 Exception 처리
+        if (paymentResulr.getResultCode().equals(-2L)) {
             throw new PaymentException("<<< PaymentService : No-Response or Timed-out. please, try later... >>>");
-        // Payment 내부 에러인 경우    
-        } else if (pr.getResultCode().equals(-1L)) {
-            throw new PaymentException("<<< PaymentService : 결제 처리에 실패하였습니다. :: " + pr.getResultMessage() + " >>>");
+        } else if (paymentResulr.getResultCode().equals(-1L)) {
+            throw new PaymentException("<<< PaymentService : 결제 처리에 실패하였습니다. :: " + paymentResulr.getResultMessage() + " >>>");
         } else {
-            // 성공할 경우 ResultCode가 paymentId이다.
-            theCaller.setStatus(CallerStatus.APPROVED);
-            theCaller.setPaymentId(pr.getResultCode());
-            callerRepository.save(theCaller);
+            theConsult.setStatus(ConsultStatus.APPROVED);
+            theConsult.setPaymentId(paymentResulr.getResultCode());
+            consultRepository.save(theConsult);
         }
+    }
+}
 ```
 
-- Payment가 승인 거부시 Caller는 리턴받은 결과를 다음과 같이 보여준다.
-![img](images/cal262-sync-call-result.png)
+- 결제서비스 Payment에서 문제가 발생 시, 아래와 같이 처리된다. 
+![img](images/tl_syncfallback_1.png)
 
-- Payment 응답이 느려질 경우, Fallback에 의해 다음과 같이 나타난다.
-![img](/images/cal262-sync-callback.png)  
+![img](images/tl_syncfallback_1.png)
      
    
 ## 비동기식 호출 / 시간적 디커플링 / 장애격리 / 최종 (Eventual) 일관성
@@ -640,110 +755,6 @@ _(catcher가 없어도 콜 요청 및 결제가 실행된다.)_
 _(catcher 서비스가 수행된 후 대기중인 콜 요청을 수신한다.)_
    
    
-## SAGA / Correlation
-요청된 콜에 대해 결제가 완료되면 Catcher에게 해당 요청이 전달되는데, 만약 서비스 불가 지역이라면 해당 요청은 거절된 상태(CatchDenied)가 되며, Caller와 Payment 서비스에게도 각각 해당 콜이 불능 상태가 되었음을 알린다.
-이를 위해 Caller의 callerID를 각 마이크로서비스에 전달하여, 이벤트 처리시 main key로 사용되도록 하였다. 
-
-1) Caller 서비스는 결제 완료 후, Catcher에게 결제가 완료되었다는 이벤트를 보낸다.
-```java
-    @PostUpdate
-    public void onPostUpdate() {
-
-        if (this.getStatus() != CallerStatus.APPROVED) return;
-
-        if (this.getStatus() == CallerStatus.APPROVED) {
-            CallPayed callPayed = new CallPayed();
-            BeanUtils.copyProperties(this, callPayed);
-            callPayed.publishAfterCommit();
-
-            log.info(" ### CallPayed Event Created ###");
-        }
-    }
-```
-2) Catcher는 전달받은 이벤트의 callId를 correlation 키로 사용하며, 다시 CatchDenied 이벤트를 발생시킨다.
-```java
-    // Catcher의 PolicyHandler
-    @StreamListener(KafkaProcessor.INPUT)
-    public void wheneverCallPayed_receiveCall(@Payload CallPayed callPayed){
-        if(!callPayed.validate()) return;
-    
-        Optional<Catcher> optionalCatcher = catcherRepository.findByCallId(callPayed.getCallId());
-    
-        if (optionalCatcher.isPresent()) {
-            throw new IllegalStateException("<<< 이미 접수된 콜 정보입니다 : >>>" );
-        } 
-        Catcher catcher = new Catcher();
-        catcher.setCallId(callPayed.getCallId());   // callId를 키값으로 보관
-        catcher.setMobile(callPayed.getMobile());
-        catcher.setLocation(callPayed.getLocation());
-    
-        String location = catcher.getLocation();
-        if (!outOfService(location)) {              // 서비스 불가능 지역이면 DENY 처리
-            catcher.setCatchStatus(CatchStatus.RECEIVED);
-        } else {
-            catcher.setCatchStatus(CatchStatus.DENIED);
-        }
-        catcherRepository.save(catcher);
-    }
-        ...
-    // Catcher Entity 저장시 CatchDenied 이벤트 발생
-    @PostPersist
-    public void onPostPersist() {
-        System.out.println(" ### Catcher.onPostPersist ###");
-
-        if (this.getCatchStatus() == CatchStatus.RECEIVED) {
-            ...
-        } else if (this.getCatchStatus() == CatchStatus.DENIED) {
-            System.out.println(" ### 서비스 불가 지역입니다. ###");
-            CatchDenied catchDenied = new CatchDenied();
-            BeanUtils.copyProperties(this, catchDenied);
-            catchDenied.publishAfterCommit();
-        }
-    }
-```
-3) Payment는 CatchDenied가 수신되면 Payment 상태를 불능 상태로 바꾸어 버린다.
-```java
-    @StreamListener(KafkaProcessor.INPUT)
-    public void wheneverCatchDenied_disablePayment(@Payload CatchDenied catchDenied){
-        if(!catchDenied.validate()) return;
-
-        Optional<Payment> payment = paymentRepository.findByCallId(catchDenied.getCallId());
-
-        if(!payment.isPresent()) return;
-
-        Payment thePayment = payment.get();
-        thePayment.setStatus(PaymentStatus.DISABLED);
-
-        paymentRepository.save(thePayment);
-
-    }
-```
-4) Caller에게도 콜요청이 거부되었음을 알려준다.
-```java
-    @StreamListener(KafkaProcessor.INPUT)
-    public void wheneverCatchDenied_updateStatus(@Payload CatchDenied catchDenied){
-        if(!catchDenied.validate()) return;
-
-        log.info("\n\n##### listener Dashboard catchDenied : " + catchDenied.toJson() + "\n\n");
-
-        Long callId = Long.valueOf(catchDenied.getCallId());
-        Optional<Caller> caller = callerRepository.findById(callId);
-
-        if (!caller.isPresent()) {
-            throw new InvalidParameterException("<<< 대상 콜을 찾을 수 없습니다 (Wrong callerId : " + catchDenied.getCallId() + " ) >>> ");
-        }
-        Caller theCaller = caller.get();
-
-        theCaller.setStatus(CallerStatus.DENIED);
-        callerRepository.save(theCaller);
-
-    }
-```
-   
-아래는 SAGA 패턴이 적용되어 정상적으로 요청되었던 콜이 Catcher에 의해 처리되는 동안 발생되는 이벤트를 보여준다.   
-![](/images/cal262-SAGA-event.png)   
-   
-
    
    
    
