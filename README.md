@@ -813,113 +813,97 @@ public class ConsultController {
 
 ## CI/CD 설정
 ### 도커 이미지 및 컨테이너 배포   
-각 마이크로 서비스별로 build 후에 docker 이미지를 azure 레지스트리에 올린다. 
-- **Build 및 Dockerizing** 
+로컬에서 환경 구축 후, 개별 마이크로 서비스에 대해서 Maven Build -> Docker build -> Docker Push를 통해서 azure의 레지스트리에 등록한다.
+
+- **azure 로그인 프로세스 후, 각 마이크로 서비스로 이동 후 Maven, Docker Build 및 Push** 
 ```shell
-# 프로젝트 디렉토리에서 시작
-cd caller
-mvn package -Dmaven.test.skip=true
-docker build -t nicecall.azurecr.io/caller:latest .
-docker push nicecall.azurecr.io/caller:latest 
+//azure
+az aks get-credentials --resource-group finaltest-rsrcgrp --name finaltest202109-aks
+az aks update -n finaltest202109-aks -g finaltest-rsrcgrp --attach-acr finaltest202109
+az acr login --name finaltest202109
 
-cd ../catcher
-mvn package -Dmaven.test.skip=true
-az acr login --name nicecall
-docker build -t nicecall.azurecr.io/catcher:latest .
-docker push nicecall.azurecr.io/catcher:latest 
-...
+// consult 서비스(예시로 1개의 서비스만 표시)
+mvn clean
+mvn package
+docker build -t finaltest202109.azurecr.io/caller:latest .
+docker push finaltest202109.azurecr.io/caller:latest
+
 ```
-_위와 같은 방식으로 나머지 마이크로서비스 프로젝트에 대해서도 수행한다._
-   
-- **namespace 및 deboloyment, service 생성**
+
+- **쿠버네티스 namespace 및 deboloyment, service 생성 및 종료**
 ```shell
-# namespace 생성
-kubectl create namespace nicecall
-kubectl config set-context --current --namespace=nicecall
+kubectl create namespace talklawer // 최초 1회
+kubectl config set-context --current --namespace=talklawer
 
-# caller deployment, service 생성
-kubectl apply -f ../caller/azure/deploy.yaml
-kubectl apply -f ../caller/azure/service.yaml
+kubectl apply -f deploy.yaml
+kubectl apply -f service.yaml
 
-# catcher deployment, service 생성
-kubectl apply -f ../catcher/azure/deploy.yaml
-kubectl apply -f ../catcher/azure/service.yaml
-..
+kubectl delete -f service.yaml 
+kubectl delete -f deploy.yaml
 ```
-_(위와 같은 방식으로 나머지 마이크로서비스 프로젝트에 대해서도 수행한다.)_
-   
       
-각 마이크로서비스에 Deployment, Service생성에 사용된 yaml 파일은 아래와 같다. 
-- Deployment.yaml
+Deploy, Service 생성 시, YAML 파일은 아래와 같다. 
+- deploy.yaml
 ```yaml
 apiVersion : apps/v1
 kind: Deployment
 metadata:
-  name: caller
-  namespace: nicecall
+  name: consult
+  namespace: talklawer
   labels:
-    app: caller
+    app: consult
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: caller
+      app: consult
   template:
     metadata:
       labels:
-        app: caller
+        app: consult
     spec:
       containers:
-        - name: caller
-          image: nicecall.azurecr.io/caller:latest
+        - name: consult
+          image: finaltest202109.azurecr.io/consult:latest
           ports:
             - containerPort: 8080
-```
-_(참고로 위의 yaml 파일은 가장 기본적인 형태이다.(각 마이크로서비스 특성에 따라 다른 속성이 추가된다.)_
+          env:
+            - name: payment-url
+              valueFrom:
+                configMapKeyRef:
+                  name: consult-confmap
+                  key: url
+          livenessProbe:
+            httpGet:
+              path: '/actuator/health'
+              port: 8080
+            initialDelaySeconds: 120
+            timeoutSeconds: 2
+            periodSeconds: 5
+            failureThreshold: 5
+```   
    
-   
-![](/images/cal262-microservice-deployed.png)   
-_(각 마이크로서비스 컨테이너가 cloud에서 생성되고 있는 모습)_
-  
-- Service.yaml
+- service.yaml
 ```yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: caller
-  namespace: nicecall
+  name: consult
+  namespace: talklawer
   labels:
-    app: caller
+    app: consult
 spec:
   ports:
     - port: 8080
       targetPort: 8080
   selector:
-    app: caller
+    app: consult
 ```
 
-![](/images/cal262-microservice-running.png)
-_(각 마이크로서비스가 cloud에 running 된 모습)_
-   
+![img](images/tl_ci_1.png)
 
-### 자동화된 DevOps Pipeline 적용 
-서비스가 안정되면 Azure Cloud DevOps를 활용하여 다음과 같이 Pipeline을 작성하여 CI/CD를 자동화한다.
-- caller 마이크로서비스에 대해 CI/CD Pipeline 생성한 모습
-  ![](/images/cal262-pipeline-CI.png)
-  ![](/images/cal262-pipeline-CD.png) 
+![img](images/tl_ci_2.png)
 
-- Step1. Github에 변경사항 push 한다.
-![](/images/cal262-pipeline-triggered.png)
-- Step2. DevOps CI pipeline이 실행됨
-![](/images/cal262-pipeline-CI-res1.png)
-![](/images/cal262-pipeline-CI-res2.png)
-
-- Step3. DevOps CD pipeline이 start됨
-![](/images/cal262-pipeline-CD-res1.png)
-
-- Step4. Caller 서비스가 cloud에서 실행되는 모습
-![](/images/cal262-pipeline-CD-res2.png)  
-   
    
 ## ConfigMap 적용
 서비스 별로 변경 가능성이 있는 설정들을 ConfigMap을 사용해서 관리하기위해서 아래와 같이 구현하였다.
