@@ -925,9 +925,7 @@ _(각 마이크로서비스가 cloud에 running 된 모습)_
 서비스 별로 변경 가능성이 있는 설정들을 ConfigMap을 사용해서 관리하기위해서 아래와 같이 구현하였다.
 
 1) 변호사의 대면상담가능 지역외의 경우, 속성값을 받아서 체크하는 로직을 추가
-```java
-        ...
-    
+```java    
    @Value("${schedule.consultservice.area}")
     String consultAreas;
     private Boolean checkAreaOfConsult(String location) {
@@ -941,7 +939,8 @@ _(각 마이크로서비스가 cloud에 running 된 모습)_
         }
         return true;
     }
-    
+```
+
 2) application.yml
 ```yaml
 # application.yml
@@ -967,6 +966,7 @@ schedule:
                   name: schedule-confmap
                   key: area
 ```
+
 4) ConfigMap은 아래와 같음.
 ```yaml
 apiVersion: v1
@@ -1000,25 +1000,6 @@ data:
 CB는 Spring FeignClient + Hystrix 를 사용하여 구현하였다. 
 Hystrix는 FeignClient 결제처리시간이 3초 초과시 CB가 동작하도록 설정하였으며, 특정 ID를 기준으로 1번만 발생하도록 한다. 
 
-- Hystrix 테스트를 위해 callId=999의 조건의 경우 0.8~1.2초 정도 sleep이 발생하도록 Payment Service 내부에 다음과 같이 로직을 삽입하였다. 
-```java
-    @RequestMapping(value = "/payments/approve",
-            method = RequestMethod.POST,
-            produces = "application/json;charset=UTF-8")
-    public PaymentResult approve(@RequestBody HashMap<String, String> map) {
-
-        PaymentResult pr = new PaymentResult();
-        try {
-            String callId    = this.getParam(map, "callId", true);
-
-            // Circuit break 테스트를 위해 일부러 sleep을 발생시킨다.
-            if (callId.equals ("999")) {
-                System.out.println("<<<<< --- SLEEPING (1±0.2 seconds) for Hystrix Test --- >>>>> ");
-                Thread.sleep((long) (800 + Math.random() * 400));
-                ...
-            }
-```
-   
 - Consult의 application.yaml 에 threshold 값을 설정하며, 위에 언급한 바와 같이 3초로 설정한다.
 ```yml
 api:
