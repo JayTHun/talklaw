@@ -16,8 +16,8 @@ Repositories
   - [분석/설계](#분석설계)
     - AS-IS 조직
     - TO-BE 조직
-    - 서비스 설계를 위한 Event Storming(#서비스-설계를-위한-event-storming)
-    - 헥사고날 아키텍처 다이어그램 도출(#헥사고날-아키텍처-다이어그램-도출)
+    - 서비스 설계를 위한 Event Storming
+    - 헥사고날 아키텍처 다이어그램 도출
   - [구현 및 검증](#구현)
     - [DDD 의 적용](#ddddomain-driven-design-의-적용)
     - [CQRS 구현](#cqrs-구현)
