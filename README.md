@@ -1065,10 +1065,6 @@ hystrix:
 ![img](images/tl_cb_2.png)
    
 
-## 오토스케일 아웃 (HPA) (SKIP)
-## Zero-downtime Deploy (Readiness Probe) (SKIP) 
-
-## Persistence Volume (SKIP)
 ## Self-healing (Liveness Probe)
 
 Pod가 비정상적인 경우, RESTART하는 기능이다. 확인을 위해서, Deploy.yaml의 해당 포트를 변경하고 재배포하였다.
@@ -1119,5 +1115,11 @@ spec:
 ![img](images/tl_liveness_1.png)
 
 - 재배포 후, Liveness 확인 실패로 인한 RESTART 처리
-![img](images/tl_liveness_1.png)
+![img](images/tl_liveness_2.png)
 
+
+
+## 오토스케일 아웃 (HPA) (SKIP)
+## Zero-downtime Deploy (Readiness Probe) (SKIP) 
+
+## Persistence Volume (SKIP)
