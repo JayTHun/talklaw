@@ -12,25 +12,28 @@ Repositories
 
 - [법률 상담 (talk-Lawer) 서비스]
   - [서비스 시나리오](#서비스-시나리오)
-    - 요구사항
   - [체크포인트](#체크포인트)
   - [분석/설계](#분석설계)
-    - 개요 및 구성 목표
-    - 서비스 설계를 위한 Event Storming
-    - 헥사고날 아키텍처 다이어그램 도출
-  - [구현방안 및 검증](#구현)
+    - AS-IS 조직(#AS--IS-조직)
+    - TO-BE 조직(#TO--BE-조직)
+    - 서비스 설계를 위한 Event Storming(#서비스-설계를-위한-Event-Storming)
+    - 헥사고날 아키텍처 다이어그램 도출(#헥사고날-아키텍처-다이어그램-도출)
+  - [구현 및 검증](#구현)
     - [DDD 의 적용](#ddddomain-driven-design-의-적용)
     - [CQRS 구현](#cqrs-구현)
-    - [Polyglot Persistence](#Polyglot-Persistence)
+    - [Polyglot Persistence](#polyglot-persistence)
     - [SAGA / Correlation](#saga--correlation)
-    - [동기식 호출 과 Fallback 처리](#동기식-호출과-fallback-처리)
-    - [비동기식 호출 / 시간적 디커플링 / 장애격리 / 최종(Eventual) 일관성](#비동기식-호출--시간적-디커플링--장애격리--최종-eventual-일관성)
+    - [Gateway 적용](#gateway-적용)
+    - [동기식 호출과 Fallback 처리](#동기식-호출과-fallback-처리)
+    - [비동기식 호출 / 시간적 디커플링 / 장애격리 / 최종(Eventual) 일관성](#비동기식-호출--시간적-디커플링--장애격리--최종-eventual-일관성-테스트)
   - [베포 및 운영](#배포-및-운영)
     - [CI/CD 설정](#cicd-설정)
-    - [동기식 호출 / 서킷 브레이킹 / 장애격리](#동기식-호출--서킷-브레이킹--장애격리)
+    - [ConfigMap 적용](#configmap-적용)
+    - [동기식 호출 / 서킷 브레이커 / 장애격리](#동기식-호출--서킷-브레이커--장애격리)
+    - [항상성 유지](#self--healing--liveness-probe)
     - [오토스케일 아웃](#오토스케일-아웃-hpa)
-    - [무정지 재배포](#zero-downtime-deploy-readiness-probe)
-    - [항상성 유지](#self-healing-liveness-probe)
+    - [무정지 재배포](#zero-downtime-deploy-readiness-probe)    
+    - [Persistence Volume](#persistence-volume)
 
 
 # 서비스 시나리오
@@ -97,7 +100,7 @@ Repositories
 
 ## 서비스 설계를 위한 Event Storming
 
-- **Event 도출 -> 부적격 Event 탈락 -> Actor/Commend 부착 -> Aggregate 묶기 -> Bounded Context 묶기 -> Policy 도출, 이동 -> Context Mapping -> 1차 모델 도출 -> 요구사항 검증 및 보완 -> 최종 모델**
+- **Event 도출 -> 부적격 Event 탈락 -> Actor/Command -> Aggregate -> Bounded Context -> Policy 도출, 이동 -> Context Mapping -> 1차 모델 도출 -> 요구사항 검증 및 보완 -> 최종 모델**
 
 
 ### Events 도출
