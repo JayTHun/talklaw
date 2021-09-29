@@ -505,11 +505,6 @@ server:
   port: 8080
 ```
 
-## gateway 적용
-
-gateway와 ingress를 통한 서버스 인바운드 연결 지원을 테스트 한다.
-
-1. Gateway
 - 로컬의 Hosts 파일에 각 서비스들을 external-IP를 이용하여 등록
 ![image](./images/tl_gateway_test3.png)
 ![image](./images/tl_gateway_test4.png)
@@ -685,21 +680,6 @@ public class ConsultController {
      
    
 ## 비동기식 호출 / 시간적 디커플링 / 장애격리 / 최종 (Eventual) 일관성 테스트
-본 시스템에 적용되어 있는 주요 비동기 호출은 다음과 같다.
-```
-  • Call 결제시, Catcher에게 알려줌 (CallPayed --> receiveCall)
-  • 결제된 Call 취소시, Payment에서도 취소되도록 하며 (CallCancelled --> cancelPayment)
-  • Catcher에게도 Call이 취소된 상태임을 알려준다. (CallCancelled --> cancelCatch)
-  • Catcher가 서비스 불능 지역으로 접수 안될 경우 Payment에게  알려준다. (CatchDenied --> disablePayment)
-```
-그 외에도 각 마이크로서비스에서 콜이 처리되는 상태를 알 수 있도록 Dashboard 서비스에게 이벤트를 전달하여 모든 기록이 남도록 한다.
-```  	
-  • Caller : CallMade, CallPayed, CallCancelled
-  • Payment : PaymentApproved,PaymentCancelled, PaymentDisabled
-  • Catcher : CallReceived, CallCaught, CatchDenied 
-```
-이를 위해 각각의 마이크로서비스에 이벤트를 수신 처리하는 PolicyHandler를 구현하였다.
-
 각 마이크로서비스 간의 이벤트 발생 시, 동기식이 아닌 비동기식 호출을 한다. 법률상담시스템에서는 사용자 결제 시, 결제 시스템간의 'Req/Res'를 제외하면, 나머지는 'Pub/Sub' 패턴의 비동기 식으로 구현되어 있다. 
 각 이벤트들은 Kafka로 이벤트를 송출하며, 수신한 데이터 처리는 PolicyHandler를 구현하여 처리한다.  
 
@@ -939,109 +919,83 @@ _(각 마이크로서비스가 cloud에 running 된 모습)_
    
    
 ## ConfigMap 적용
-변경 가능성이 높은 속성 정보에 대해서는 다음과 같이 ConfigMap을 적용하여 구현하였다.
-1) 대리운전 서비스 불가 지역에 대해 소스코드내에 다음과 같이 application 속성 값을 받아들이도록 지정
+서비스 별로 변경 가능성이 있는 설정들을 ConfigMap을 사용해서 관리하기위해서 아래와 같이 구현하였다.
+
+1) 변호사의 대면상담가능 지역외의 경우, 속성값을 받아서 체크하는 로직을 추가
 ```java
         ...
     
-    @Value("${catcher.service.area}")
-    String svcAreas;
-    // 전달받은 요청이 서비스 지역에 포함되어 있는지 검증한다.
-    private Boolean outOfService(String location) {
+   @Value("${schedule.consultservice.area}")
+    String consultAreas;
+    private Boolean checkAreaOfConsult(String location) {
+        System.out.println(" SCHEDULE CONSULT SERVICE AREA : " + consultAreas);
 
-        System.out.println(" CATCHER SERVICE AREA : " + svcAreas);
-        String [] arrSvcArea = svcAreas.split(",");
-
-        for (int i = 0; i < arrSvcArea.length ; i++) {
-            String s = arrSvcArea[i].toLowerCase();
-
-            // 서비스 지역이면 false 리턴
-            if (s.equals(location.toLowerCase())) return false;
+        String [] arrConsultArea = consultAreas.split(",");
+        for (int i = 0; i < arrConsultArea.length ; i++) {
+            // 상담가능지역이면 FALSE, 상담불가지역이면 TRUE
+            if (arrConsultArea[i].toLowerCase().equals(location.toLowerCase())) return false;
 
         }
         return true;
     }
-```
-1) application.yml 파일 내부에서는 환경 변수를 통해 전달받도록 설정 
+    
+2) application.yml
 ```yaml
 # application.yml
-catcher:
-  service:
-    area: ${catcher-area}   # 환경 변수
+schedule:
+  consultservice:
+    area: ${schedule-area}
+
 ```
 
-1) deployment 내부에서는 catcher-area 환경변수의 값에 대하여  catcher-cm이라는 configMap을 참조시킴
+3) deployment.yaml 에서 schedule.consult.service.area를 ConfigMap(Schedule-ConfMap.yaml)과 연결처리
 ```yaml
 # deploy.yaml
-env:
-  - name: catcher-area
-    valueFrom:
-      configMapKeyRef:
-        name: catcher-cm
-        key: area
+    spec:
+      containers:
+        - name: schedule
+          image: finaltest202109.azurecr.io/schedule:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: schedule-area
+              valueFrom:
+                configMapKeyRef:
+                  name: schedule-confmap
+                  key: area
 ```
-4) 최종적으로 configMap 안에 다음과 같이 고정 값을 넣어두고 쉽게 수정할 수 있도록 구현함
+4) ConfigMap은 아래와 같음.
 ```yaml
-# catch-cm.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: catcher-cm
-  namespace: nicecall
+  name: schedule-confmap
+  namespace: talklawer
 data:
-  area: kangnam,dongjak,nowon,mapo,jongro,bundang
+  area: gangseo,gangdong,gangnam,gangdong,bundang,hanam,bucheon
 ```
-이와 같이 configMap에 설정된 값이 적용되어, 서비스 가용 지역이 아닌 콜이 수신될 경우 Catcher에 에 의해 거부 처리되는 모습을 아래와 같이 확인할 수 있다.   
-![](/images/cal262-cm-ex1.png)    
-   
-## Persistence Volume
-nicecall-pvc.yaml 파일을 이용하여 persistanceVolumn 선언하였다.
-```yaml
-# nicecall-pvc.yaml
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: nicecall-disk
-  namespace: nicecall
-spec:
-  accessModes:
-    - ReadWriteMany
-  storageClassName: azurefile
-  resources:
-    requests:
-      storage: 1Gi
-```
-선언된 디스크 사용을 위해 caller와 catcher의 deploy.yaml에 Volumn 및 Mount 정보는 다음과 추가한다. 
-```yaml
-# deploy.yaml
-volumeMounts:
-  - mountPath: "/mnt/azure"
-    name: volume
-volumes:
-  - name: volume
-    persistentVolumeClaim:
-      claimName: nicecall-disk
-```
-application.yml에는 해당 볼륨에 사용할 경로를 지정한다.(caller의 설정 내용)
-```yaml
-# application.yml
-logging:
-  level:
-    root: info
-  file: /mnt/azure/logs/caller.log
-```
-_(위와 같이 catcher의 설정 파일에도 로그 파일 위치를 지정)_
 
-해당 로그 파일이 계속 누적하여 쌓이고 있는지는 다음과 같이 확인한다.
-![](/images/cal262-pvc-logfile.png)
- 
-  
+- 고객이 정의되지않은 지역인 '의정부'로 상담 요청
+![img](/images/tl_configmap_1.png)   
+
+- 고객이 상담료 결제
+![img](images/tl_configmap_2.png)
+
+- 일정관리시스템이 상담지역 체크 후, 상담 거절 처리
+![img](images/tl_configmap_3.png)
+
+- 결제시스템에서 이벤트 수신, 결제건 취소
+![img](images/tl_configmap_4.png)
+
+- 고객의 상담 요청건에 대해서 거절 처리 
+![img](images/tl_configmap_5.png)
+
 ----
-## 동기식 호출 / 서킷 브레이킹 / 장애격리
-서킷 브레이커는 Spring FeignClient + Hystrix 를 적용하여 구현하였다.  
+## 동기식 호출 / 서킷 브레이커 / 장애격리
+고객의 상담 요청 진행 중, 특정 상담건에 대해서 결제 중 5초간 Sleep 처리하여 장애(지연)상황을 발생시킨다. 결제 시간이 3초 초과 시 Circuit Breaker(이하 CB)를 통해서 장애를 격리시킨다.
 
-동기호출 방식의 콜 결제(Caller --> Payment) 부분은 Feign Client와 Fallback을 적용하여 구현하였음을 이미 위에서 제시하였다.   
-본 시나리오에서는 hystrix를 통해 timeout 임계값을 설정하고 부하가 발생할 경우 어떻게 Circuit Break가 작동되는지를 확인한다. 
+CB는 Spring FeignClient + Hystrix 를 사용하여 구현하였다. 
+Hystrix는 FeignClient 결제처리시간이 3초 초과시 CB가 동작하도록 설정하였으며, 특정 ID를 기준으로 1번만 발생하도록 한다. 
 
 - Hystrix 테스트를 위해 callId=999의 조건의 경우 0.8~1.2초 정도 sleep이 발생하도록 Payment Service 내부에 다음과 같이 로직을 삽입하였다. 
 ```java
@@ -1062,230 +1016,94 @@ _(위와 같이 catcher의 설정 파일에도 로그 파일 위치를 지정)_
             }
 ```
    
-- 다음은 Payment를 호출하는 Caller 서비스의 설정 파일에 timeout 임계값을 1.5초로 설정한다.
+- Consult의 application.yaml 에 threshold 값을 설정하며, 위에 언급한 바와 같이 3초로 설정한다.
 ```yml
-# application.yml (Caller 서비스)
+api:
+  url:
+    payment: ${payment-url}
 feign:
   hystrix:
     enabled: true
 hystrix:
   command:
     default:
-      execution.isolation.thread.timeoutInMilliseconds: 1500
+      execution.isolation.thread.timeoutInMilliseconds: 3000
       circuitBreaker.requestVolumeThreshold: 1
 
 ```
    
-- 이제 siege 툴을 사용하여 부하를 줄 경우 어떻게 CB가 작동되는지 확한다.
+- 결제 시, 특정 상담건에 대해서 Sleep 처리한다 (consultId=2)
   
-```shell
-# (1) 5명 동시 사용자로, 10초 동안 부하를 발생시킨 경우
-siege -c5 -t10S -v 'http://localhost:8081/calls/payCall/999'
-```
-  ![](/images/cal262-hystrix-ex1.png)
-_(Availability가 100%로, 서비스 응답시 1.2초의 sleep이 발생하더라도 임게값이 1.5초이기 때문에 CB가 작동되지 않는다.)_
+```java
+    @Autowired
+    PaymentRepository paymentRepository;
 
+    @RequestMapping(value = "/payment/approve",
+            method = RequestMethod.POST,
+            produces = "application/json;charset=UTF-8")
+    public PaymentResult approve(@RequestBody HashMap<String, String> map) {
 
-```shell
-# (2) 30명 동시 사용자로, 10초 동안 부하를 발생시킨 경우
-siege -c30 -t10S -v 'http://localhost:8081/calls/payCall/999'
+        PaymentResult paymentResult = new PaymentResult();
+        try {
+            String consultId    = this.getParam(map, "consultId", true);
+
+            // Circuit break : sleep (5000ms)
+            if (consultId.equals ("2")) {
+                System.out.println("####################################################");
+                System.out.println("############## Circuit break & Hystrix Test (Sleep) ################");
+                System.out.println("####################################################");
+                Thread.sleep(5000);
+                paymentResult.setResultCode(0L);          
+                paymentResult.setResultMessage("0");
+                return paymentResult;
+            }
 ```
-![](/images/cal262-hystrix-ex2.png)
-_(Availability가 현저하게 낮아지며, CB가 발동되어 에러를 리턴하였다.)_
+- 고객의 상담 신청 완료
+![img](images/tl_cb_1.png)
+
+- 2번 상담건에 대해서 결제 진행 중 CB에 의한 타임아웃 발생, 시스템 중단없이 잠시 뒤에 결제가 정상적으로 처리
+![img](images/tl_cb.png)
    
 
-## 오토스케일 아웃 (HPA)
+## 오토스케일 아웃 (HPA) (SKIP)
+## Zero-downtime Deploy (Readiness Probe) (SKIP) 
 
-- 앞서 CB 는 시스템을 안정되게 운영할 수 있게 해줬지만 사용자의 요청을 100% 받아들여주지 못했기 때문에 이에 대한 보완책으로 자동화된 확장 기능을 적용하고자 한다. 
-
-- 콜요청(caller) 서비스에 대한 replica 를 동적으로 늘려주도록 HPA 를 설정한다. 설정은 CPU 사용량이 15프로를 넘어서면 replica 를 10개까지 늘려준다.
-
-- 기 배포된 deployment의 Resources의 설정값이 높아 아래 내용으로 변경
-```yaml
-    resources:
-      requests:
-        memory: "64Mi"
-        cpu: "100m"
-      limits:
-        memory: "500Mi"
-        cpu: "200m"
-```
-- HPA 설정 값 확인 및 HPA 배포
-```
- - cpu-percent=15
- - Min Pod : 1
- - Max Pod : 10
-```
-```shell
-kubectl autoscale deployment caller --cpu-percent=15 --min=1 --max=10 -n nicecall
-```
-![hpa-caller](https://user-images.githubusercontent.com/45417337/133004629-cacc1f37-71cc-4aa6-8bd5-6e35a1964e6d.PNG)
-
-- Siege를 이용해 부하 발생   
-![hpa-siege부하](https://user-images.githubusercontent.com/45417337/133004680-a39e25b2-67e8-45c4-9fe4-35aaaf859552.PNG)
-
-- 부하 발생 후 Pod 상태 확인
-![hpa-결과](https://user-images.githubusercontent.com/45417337/133004691-8316f126-ac70-41ae-b3de-0f071dec51fa.PNG)
-
-HPA 설정에 의해 Pod가 10까지 늘어난것을 확인
-
-## Zero-downtime Deploy (Readiness Probe) 
-
-* 먼저 무정지 재배포가 100% 되는 것인지 확인하기 위해서 Autoscaler 이나 CB 설정을 제거함.
-- Readiness 미적용 yaml확인
-```yaml
-# deploy-readiness-v2.yaml
-apiVersion : apps/v1
-kind: Deployment
-metadata:
-  name: catcher
-  namespace: nicecall
-  labels:
-    app: catcher
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: catcher
-  template:
-    metadata:
-      labels:
-        app: catcher
-    spec:
-      containers:
-        - name: catcher
-          image: kubecal262.azurecr.io/nicecall-catcher:v0.2
-          ports:
-            - containerPort: 8080
-          env:
-            - name: catcher-area
-              valueFrom:
-                configMapKeyRef:
-                  name: catcher-cm
-                  key: area
-          resources:
-            requests:
-              memory: "64Mi"
-              cpu: "200m"
-            limits:
-              memory: "500Mi"
-              cpu: "500m"
-          volumeMounts:
-            - mountPath: "/mnt/azure"
-              name: volume
-      volumes:
-        - name: volume
-          persistentVolumeClaim:
-            claimName: nicecall-disk
-```
-
-- Readiness 적용 deployment 배포
-```shell
-kubectl apply -f deploy-readiness-v2.yaml
-```
-
-- Readiness 미적용 배포에 대한 siege 워크로드 모니터링   
-![readiness2](https://user-images.githubusercontent.com/45417337/133004511-167d6709-858a-480d-ada6-b0f6975212db.PNG)
-
-- Readiness 적용 yaml확인
-```yaml
-# deploy-readiness-v3.yaml
-apiVersion : apps/v1
-kind: Deployment
-metadata:
-  name: catcher
-  namespace: nicecall
-  labels:
-    app: catcher
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: catcher
-  template:
-    metadata:
-      labels:
-        app: catcher
-    spec:
-      containers:
-        - name: catcher
-          image: kubecal262.azurecr.io/nicecall-catcher:v0.3
-          ports:
-            - containerPort: 8080
-          env:
-            - name: catcher-area
-              valueFrom:
-                configMapKeyRef:
-                  name: catcher-cm
-                  key: area
-          readinessProbe:
-            httpGet:
-              path: '/actuator/health'
-              port: 8080
-            initialDelaySeconds: 90
-            timeoutSeconds: 2
-            periodSeconds: 5
-            failureThreshold: 10
-          resources:
-            requests:
-              memory: "64Mi"
-              cpu: "200m"
-            limits:
-              memory: "500Mi"
-              cpu: "500m"
-          volumeMounts:
-            - mountPath: "/mnt/azure"
-              name: volume
-      volumes:
-        - name: volume
-          persistentVolumeClaim:
-            claimName: nicecall-disk
-```
-
-- Readiness 적용 deployment 배포
-```shell
-kubectl apply -f deploy-readiness-v3.yaml
-```
-
-- siege 워크로드로 부하 발생 및 모니터링   
-![readiness4](https://user-images.githubusercontent.com/45417337/133004535-b2a944a3-3427-441c-a604-6a1446a4e55b.PNG)
-
-Readiness 적용 deployment 배포 시 서비스 중단 없이 운영되는것을 확인
-
+## Persistence Volume (SKIP)
 ## Self-healing (Liveness Probe)
 
-Liveness Probe의 기능인 Pod 상태 체크 후 Pod가 비정상적인 경우 자동 재시작 하는 기능을 확인한다.
-- Liveness Probe 적용 yaml 확인
+Pod가 비정상적인 경우, RESTART하는 기능이다. 확인을 위해서, Deploy.yaml의 해당 포트를 변경하고 재배포하였다.
+
+- Liveness Probe 적용된 정상 yaml
 ```yaml
 # deploy-liveness.yaml
 apiVersion : apps/v1
 kind: Deployment
 metadata:
-  name: catcher
-  namespace: nicecall
+  name: consult
+  namespace: talklawer
   labels:
-    app: catcher
+    app: consult
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: catcher
+      app: consult
   template:
     metadata:
       labels:
-        app: catcher
+        app: consult
     spec:
       containers:
-        - name: catcher
-          image: kubecal262.azurecr.io/nicecall-catcher:v0.1
+        - name: consult
+          image: finaltest202109.azurecr.io/consult:latest
           ports:
             - containerPort: 8080
           env:
-            - name: catcher-area
+            - name: payment-url
               valueFrom:
                 configMapKeyRef:
-                  name: catcher-cm
-                  key: area
+                  name: consult-confmap
+                  key: url
           livenessProbe:
             httpGet:
               path: '/actuator/health'
@@ -1293,33 +1111,13 @@ spec:
             initialDelaySeconds: 120
             timeoutSeconds: 2
             periodSeconds: 5
-            failureThreshold: 3
-          resources:
-            requests:
-              memory: "64Mi"
-              cpu: "200m"
-            limits:
-              memory: "500Mi"
-              cpu: "500m"
-          volumeMounts:
-            - mountPath: "/mnt/azure"
-              name: volume
-      volumes:
-        - name: volume
-          persistentVolumeClaim:
-            claimName: nicecall-disk
+            failureThreshold: 5
+
 ```
 
-- 테스트 대상 Pod 상태 확인
-![liveness1](https://user-images.githubusercontent.com/45417337/133004292-2f5a345d-0e9a-443e-8b48-098056f937f9.PNG)
+- 재배포를 위한 LivenessProbe 변경부분
+![img](images/tl_liveness_1.png)
 
-- 대상 Pod의 상태를 불능(Down)으로 변경
-![liveness2](https://user-images.githubusercontent.com/45417337/133004303-0725f961-c995-44fc-bb0f-5276880f11f4.PNG)
+- 재배포 후, Liveness 확인 실패로 인한 RESTART 처리
+![img](images/tl_liveness_1.png)
 
-- Pod의 상태 변경 사항 확인 - Restarts 변경됨
-![liveness3](https://user-images.githubusercontent.com/45417337/133004405-4eb1283f-4b2f-40d0-87ba-75f006de9512.PNG)
-
-- Pod Event 확인
-![liveness4](https://user-images.githubusercontent.com/45417337/133004422-6c314b5f-5954-46f0-a358-9dea33df11b7.PNG)
-
-테스트를 통해 liveness Probe가 적용된 경우 Pod의 상태가 불능일 경우 재시작 됨을 확인
