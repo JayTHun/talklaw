@@ -1062,7 +1062,7 @@ hystrix:
 ![img](images/tl_cb_1.png)
 
 - 2번 상담건에 대해서 결제 진행 중 CB에 의한 타임아웃 발생, 시스템 중단없이 잠시 뒤에 결제가 정상적으로 처리
-![img](images/tl_cb.png)
+![img](images/tl_cb_2.png)
    
 
 ## 오토스케일 아웃 (HPA) (SKIP)
